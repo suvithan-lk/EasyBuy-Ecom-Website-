@@ -1,6 +1,6 @@
-﻿# EasyBuy – Architecture & Diagrams (No Code)
+﻿# EasyBuy – Architecture & Diagrams
 
-This document provides the **complete architecture** and **visual diagrams** for the EasyBuy online shopping platform. All diagrams use **Mermaid** syntax – you can render them in any Markdown viewer (GitHub, VS Code with Mermaid plugin, or copy-paste into [Mermaid Live Editor](https://mermaid.live/)).
+
 
 ---
 
