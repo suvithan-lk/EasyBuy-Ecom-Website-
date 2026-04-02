@@ -1,0 +1,616 @@
+﻿# EasyBuy – Architecture & Diagrams (No Code)
+
+This document provides the **complete architecture** and **visual diagrams** for the EasyBuy online shopping platform. All diagrams use **Mermaid** syntax – you can render them in any Markdown viewer (GitHub, VS Code with Mermaid plugin, or copy-paste into [Mermaid Live Editor](https://mermaid.live/)).
+
+---
+
+## 1. High-Level System Architecture (Component View)
+
+```mermaid
+graph TB
+    subgraph Client
+        Browser[Web Browser / PWA]
+    end
+
+    subgraph Frontend_Hosting["Vercel (Frontend)"]
+        NextJS[Next.js App<br/>Bootstrap 5 UI]
+    end
+
+    subgraph Backend_Hosting["Azure / Railway (Backend)"]
+        API[ASP.NET Core Web API]
+        Services[Services Layer]
+        Repos[Repository Layer]
+    end
+
+    subgraph External_Services
+        Firebase[Firebase Auth]
+        PayHere[PayHere Payment Gateway]
+    end
+
+    subgraph Data_Layer
+        MSSQL[(MSSQL Database)]
+        Redis[(Redis Cache - optional)]
+    end
+
+    Browser --> NextJS
+    NextJS -->|HTTPS + JWT| API
+    NextJS -->|Firebase SDK| Firebase
+    API -->|Verify Token| Firebase
+    API --> Services
+    Services --> Repos
+    Repos --> MSSQL
+    Services --> Redis
+    API -->|Webhook / API call| PayHere
+    PayHere -->|Payment Status| API
+```
+
+**Explanation:**  
+- **Next.js** frontend (hosted on Vercel) handles all UI, client‑side state, and Firebase authentication.  
+- **ASP.NET Core Web API** (hosted on Azure/AWS/Railway) provides REST endpoints for products, orders, cart, wishlist, etc.  
+- **Firebase Auth** issues tokens; the backend validates them via Firebase Admin SDK.  
+- **PayHere** is called during checkout; its webhooks notify the backend about payment success/failure.  
+- **MSSQL** stores all business data; **Redis** (optional future) caches product lists & sessions.
+
+---
+
+## 2. Frontend Architecture (Next.js)
+
+```mermaid
+graph LR
+    subgraph Next_App["Next.js Application"]
+        Pages[Pages / App Router]
+        Components[Reusable Components<br/>ProductCard, CartDrawer...]
+        Context[State Management<br/>Zustand / Context API]
+        Hooks[Custom Hooks<br/>useAuth, useCart...]
+        Services_FE[API Service Layer<br/>Axios calls to Backend]
+    end
+
+    Pages --> Components
+    Pages --> Context
+    Components --> Hooks
+    Hooks --> Services_FE
+    Context --> Services_FE
+    Services_FE -->|HTTP Requests| Backend[ASP.NET Core API]
+```
+
+**Key folders (frontend):**  
+- `components/` – ProductCard, CartDrawer, Filters, Pagination  
+- `pages/` (or `app/`) – index (product listing), product/[id], cart, checkout, profile, admin dashboard  
+- `context/` – AuthContext (Firebase), CartContext (sync with backend)  
+- `services/` – apiClient.js (axios interceptors for JWT)  
+
+**Integration with Firebase:**  
+- Client‑side Firebase SDK for login/register.  
+- Token stored in `localStorage` (or http‑only cookie for better security).  
+- Token attached to every API request (`Authorization: Bearer <token>`).
+
+---
+
+## 3. Backend Architecture (ASP.NET Core Web API – Layered)
+
+```mermaid
+graph TD
+    subgraph API_Layer
+        Controllers[Controllers<br/>Product, Order, Cart, Payment, User]
+        Middleware[Middleware<br/>Auth, Rate Limiting, Exception]
+    end
+
+    subgraph Service_Layer
+        Services[Services<br/>ProductService, OrderService, PaymentService]
+        DTOs[DTOs / ViewModels]
+        Validators[FluentValidation]
+    end
+
+    subgraph Repository_Layer
+        Repositories[Repositories<br/>ProductRepo, OrderRepo, CartRepo]
+        UnitOfWork[Unit of Work]
+    end
+
+    subgraph Data_Access
+        DbContext[EF Core DbContext]
+        MSSQL[(MSSQL)]
+    end
+
+    Controllers --> Services
+    Services --> Repositories
+    Repositories --> DbContext
+    DbContext --> MSSQL
+    Services --> DTOs
+    Controllers --> Validators
+    Middleware --> Controllers
+```
+
+**Folder structure (backend):**  
+```
+/Controllers
+    ProductController.cs
+    OrderController.cs
+    CartController.cs
+    WishlistController.cs
+    PaymentController.cs
+    UserController.cs
+    AdminController.cs
+
+/Services
+    IProductService.cs / ProductService.cs
+    IOrderService.cs / OrderService.cs
+    IPaymentService.cs / PaymentService.cs
+    IInventoryService.cs
+    ICouponService.cs
+
+/Repositories
+    IGenericRepository.cs
+    IProductRepository.cs / ProductRepository.cs
+    IOrderRepository.cs / OrderRepository.cs
+    ICartRepository.cs
+    IWishlistRepository.cs
+
+/Models
+    (Entity classes: Product, Order, User, etc.)
+
+/DTOs
+    ProductCreateDTO.cs
+    OrderResponseDTO.cs
+    CartItemDTO.cs
+
+/Middleware
+    FirebaseAuthMiddleware.cs
+    RateLimitingMiddleware.cs
+
+/Validators
+    ProductValidator.cs
+    OrderValidator.cs
+
+/Helpers
+    PayHereSignatureHelper.cs
+    JwtHelper.cs
+```
+
+---
+
+## 4. Database Schema (ER Diagram)
+
+```mermaid
+erDiagram
+    Users {
+        string Id PK
+        string Email
+        string Name
+        string Phone
+        string Role "Admin/Customer/Vendor"
+        datetime CreatedAt
+    }
+
+    Addresses {
+        int Id PK
+        string UserId FK
+        string AddressLine
+        string City
+        string PostalCode
+        bool IsShipping
+        bool IsBilling
+    }
+
+    Products {
+        int Id PK
+        string Name
+        string Description
+        decimal Price
+        int Stock
+        int CategoryId FK
+        float Rating "average"
+        int DiscountPercent
+        int WarrantyMonths
+        datetime CreatedAt
+    }
+
+    ProductImages {
+        int Id PK
+        int ProductId FK
+        string ImageUrl
+        bool IsMain
+    }
+
+    Categories {
+        int Id PK
+        string Name
+        string Slug
+    }
+
+    Cart {
+        int Id PK
+        string UserId FK "or GuestId"
+        int ProductId FK
+        int Quantity
+        datetime AddedAt
+    }
+
+    Wishlist {
+        int Id PK
+        string UserId FK
+        int ProductId FK
+    }
+
+    Orders {
+        int Id PK
+        string OrderNumber "unique"
+        string UserId FK
+        decimal TotalAmount
+        string Status "Pending/Paid/Shipped/Delivered/Cancelled"
+        string PaymentId "PayHere transaction id"
+        datetime OrderDate
+        datetime ShippingDate
+        string ShippingAddress
+        decimal ShippingCost
+    }
+
+    OrderItems {
+        int Id PK
+        int OrderId FK
+        int ProductId FK
+        int Quantity
+        decimal UnitPrice
+    }
+
+    Reviews {
+        int Id PK
+        string UserId FK
+        int ProductId FK
+        int Rating "1-5"
+        string Comment
+        datetime CreatedAt
+        bool VerifiedPurchase
+    }
+
+    ReviewLikes {
+        int Id PK
+        int ReviewId FK
+        string UserId FK
+    }
+
+    Coupons {
+        int Id PK
+        string Code
+        string DiscountType "Percent/Fixed"
+        decimal DiscountValue
+        datetime ExpiryDate
+        int UsageLimit
+        int UsedCount
+    }
+
+    Payments {
+        int Id PK
+        int OrderId FK
+        string PayHerePaymentId
+        decimal Amount
+        string Status "Success/Failed/Pending"
+        datetime PaymentDate
+        string WebhookData "JSON"
+    }
+
+    Users ||--o{ Addresses : has
+    Users ||--o{ Cart : contains
+    Users ||--o{ Wishlist : owns
+    Users ||--o{ Orders : places
+    Users ||--o{ Reviews : writes
+    Users ||--o{ ReviewLikes : likes
+    Products ||--o{ ProductImages : has
+    Products ||--o{ Cart : appears_in
+    Products ||--o{ Wishlist : appears_in
+    Products ||--o{ OrderItems : included_in
+    Products ||--o{ Reviews : receives
+    Products }o--|| Categories : belongs_to
+    Orders ||--o{ OrderItems : contains
+    Orders ||--|| Payments : has_one
+    Reviews ||--o{ ReviewLikes : receives
+    Coupons ||--o{ Orders : applies_to
+```
+
+**Important notes:**  
+- `Users.Id` matches Firebase `uid` (string, not auto‑increment).  
+- `Cart` supports guest carts via `GuestId` (temporary session id).  
+- `Product.Rating` is denormalized (computed from Reviews table) for faster listing.  
+- `OrderItems` store a snapshot of product price at purchase time.
+
+---
+
+## 5. Authentication Flow (Firebase + JWT)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant NextJS
+    participant Firebase
+    participant BackendAPI
+
+    User->>NextJS: Login with email/password
+    NextJS->>Firebase: signInWithEmailAndPassword()
+    Firebase-->>NextJS: ID Token (JWT)
+    NextJS->>BackendAPI: Request with Bearer token
+    BackendAPI->>Firebase: Verify token (Firebase Admin SDK)
+    Firebase-->>BackendAPI: Decoded user claims
+    BackendAPI-->>NextJS: Protected resource + custom JWT (optional)
+```
+
+**Backend validation middleware:**  
+- Every protected endpoint extracts the token from `Authorization` header.  
+- Uses `FirebaseTokenValidator` to ensure token is not expired and issued by your Firebase project.  
+- Role (Admin/Customer/Vendor) is stored in the `Users` table and checked via claims.
+
+---
+
+## 6. Payment & Order Flow (PayHere Integration)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant NextJS
+    participant BackendAPI
+    participant PayHere
+    participant MSSQL
+
+    User->>NextJS: Proceed to checkout
+    NextJS->>BackendAPI: POST /api/order/create (cart items, address)
+    BackendAPI->>MSSQL: Create Order (status = Pending)
+    BackendAPI-->>NextJS: Order details + payment URL / hash
+    NextJS->>PayHere: Redirect to PayHere checkout page
+    User->>PayHere: Enter card / mobile money
+    PayHere-->>User: Payment confirmation
+    PayHere->>BackendAPI: Webhook (payment status, transaction ID)
+    BackendAPI->>MSSQL: Update Order status = Paid
+    BackendAPI->>MSSQL: Reduce product stock (Inventory)
+    BackendAPI->>BackendAPI: Trigger invoice generation (PDF)
+    BackendAPI->>User: Send email (order confirmation)
+    User->>NextJS: Return to success page (frontend callback)
+    NextJS->>BackendAPI: GET /api/order/status/:id
+    BackendAPI-->>NextJS: Updated order status
+```
+
+**Webhook security:**  
+- PayHere sends a signature; backend verifies it using merchant secret.  
+- Idempotency check: ignore duplicate webhook events.
+
+---
+
+## 7. Deployment Architecture (Production Ready)
+
+```mermaid
+graph TB
+    subgraph CDN[Cloudflare CDN]
+        DNS[DNS: easybuy.com]
+    end
+
+    subgraph Frontend_Hosting[Vercel]
+        NextBuild[Next.js static + serverless functions]
+    end
+
+    subgraph Backend_Hosting[Azure App Service / Railway]
+        API_Instance[ASP.NET Core API]
+        Background[Background Worker<br/>for invoice, email]
+    end
+
+    subgraph Data_Plane
+        MSSQL_Azure[Azure SQL / MSSQL]
+        Redis_Cache[Redis Cache]
+        Blob_Storage[Azure Blob / AWS S3<br/>for product images]
+    end
+
+    subgraph Monitoring
+        AppInsights[Application Insights<br/>or Sentry]
+    end
+
+    DNS --> Frontend_Hosting
+    Frontend_Hosting -->|API calls| API_Instance
+    API_Instance --> MSSQL_Azure
+    API_Instance --> Redis_Cache
+    API_Instance --> Blob_Storage
+    API_Instance --> Background
+    API_Instance --> Monitoring
+```
+
+**Key points:**  
+- **Frontend:** Vercel (automatic CI/CD, global CDN).  
+- **Backend:** Azure App Service (auto‑scale) or Railway (simpler).  
+- **Database:** Azure SQL Database (with geo‑backup) or AWS RDS for SQL Server.  
+- **Images:** Stored in cloud blob storage (Azure Blob / S3), served via CDN.  
+- **Caching:** Redis for session store, product listings (reduce DB load).  
+- **Monitoring:** Application Insights / Sentry for errors, performance metrics.
+
+---
+
+## 8. Security Architecture (Defense in Depth)
+
+```mermaid
+graph LR
+    subgraph Client_Side
+        CSP[Content-Security-Policy]
+        Secure_Cookie[http‑only cookie for refresh token]
+    end
+
+    subgraph Edge_Network
+        WAF[Web Application Firewall]
+        Rate_Limit[Rate Limiting per IP / user]
+    end
+
+    subgraph Backend_API
+        JWT_Validation[Firebase + Custom JWT]
+        Input_Validation[FluentValidation / Data Annotations]
+        SQL_Param[Entity Framework Core<br/>Parameterized Queries]
+        Anti_XSS[Output Encoding / HtmlSanitizer]
+    end
+
+    subgraph Data
+        Encrypt_AtRest[TDE / Always Encrypted]
+        Audit_Logs[Audit Trail for critical actions]
+    end
+
+    Client_Side --> Edge_Network
+    Edge_Network --> Backend_API
+    Backend_API --> Data
+```
+
+**Implemented protections:**  
+- **JWT + Firebase:** Token expiry, refresh logic.  
+- **Rate limiting:** 100 requests per minute per user (prevent abuse).  
+- **SQL injection:** impossible with EF Core (if used correctly).  
+- **XSS:** React/Next.js escapes by default; rich text (reviews) sanitised.  
+- **CSRF:** SameSite cookies + token validation for state‑changing requests.  
+- **Webhook signing:** PayHere signature verified.
+
+---
+
+## 9. Key Flows – Sequence Diagrams
+
+### 9.1 Add to Cart (Authenticated User)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant NextJS
+    participant BackendAPI
+    participant MSSQL
+
+    User->>NextJS: Click "Add to Cart"
+    NextJS->>BackendAPI: POST /api/cart/add {productId, quantity}
+    BackendAPI->>BackendAPI: Validate JWT → get UserId
+    BackendAPI->>MSSQL: SELECT product stock
+    alt Product in stock
+        BackendAPI->>MSSQL: UPSERT into Cart table
+        MSSQL-->>BackendAPI: Success
+        BackendAPI-->>NextJS: 200 OK + cart summary
+        NextJS-->>User: Update cart icon
+    else Out of stock
+        BackendAPI-->>NextJS: 400 "Out of stock"
+        NextJS-->>User: Show error toast
+    end
+```
+
+### 9.2 Apply Coupon & Checkout
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant NextJS
+    participant BackendAPI
+    participant MSSQL
+
+    User->>NextJS: Enter coupon code
+    NextJS->>BackendAPI: POST /api/coupon/validate {code}
+    BackendAPI->>MSSQL: Find coupon & check expiry/usage
+    alt Valid
+        MSSQL-->>BackendAPI: Discount details
+        BackendAPI-->>NextJS: 200 + discount amount
+        NextJS-->>User: Show discounted total
+    else Invalid
+        BackendAPI-->>NextJS: 400 "Invalid or expired"
+        NextJS-->>User: Show error
+    end
+    User->>NextJS: Confirm order
+    NextJS->>BackendAPI: POST /api/order/checkout (items, address, couponId)
+    BackendAPI->>MSSQL: Transaction: Create order, apply discount, reserve stock
+    BackendAPI-->>NextJS: Order ID + payment link
+```
+
+---
+
+## 10. Admin Dashboard – Component Diagram
+
+```mermaid
+graph TB
+    subgraph Admin_UI[Next.js Admin Pages]
+        ProductsMgmt[Products Management<br/>CRUD + bulk upload]
+        OrdersView[Orders List + Status Update]
+        UsersMgmt[Users List + Role Change]
+        SalesAnalytics[Analytics Dashboard<br/>Chart.js / Recharts]
+        CouponsMgmt[Coupons CRUD]
+    end
+
+    subgraph Backend_Endpoints
+        AdminProducts[GET/POST/PUT/DELETE /admin/products]
+        AdminOrders[GET/PUT /admin/orders]
+        AdminUsers[GET/PUT /admin/users]
+        AdminReports[GET /admin/reports/sales]
+        AdminCoupons[CRUD /admin/coupons]
+    end
+
+    ProductsMgmt --> AdminProducts
+    OrdersView --> AdminOrders
+    UsersMgmt --> AdminUsers
+    SalesAnalytics --> AdminReports
+    CouponsMgmt --> AdminCoupons
+```
+
+**Role check:** Admin endpoints check `User.Role == "Admin"` via custom authorization filter.
+
+---
+
+## 11. Notification & Email Flow
+
+```mermaid
+graph LR
+    Event[Order Status Change<br/>Payment Webhook] --> Queue[Background Queue<br/>(Hangfire / RabbitMQ)]
+    Queue --> EmailService[Email Service<br/>SendGrid / SMTP]
+    Queue --> SmsService[SMS Service<br/>Twilio - optional]
+    EmailService --> Customer[Customer Email]
+    SmsService --> Customer
+```
+
+**Email templates:**  
+- Order placed → confirmation with items & total.  
+- Payment success → receipt + PDF invoice attachment.  
+- Shipping update → tracking link.  
+
+---
+
+## 12. Performance Optimisation Layers
+
+```mermaid
+graph LR
+    Client[Browser] --> CDN[Cloudflare CDN<br/>Images, static assets]
+    Client --> NextCache[Next.js ISR / SSG<br/>Product listing pages]
+    NextCache --> BackendAPI
+    BackendAPI --> Redis[(Redis Cache<br/>Product list, session)]
+    BackendAPI --> MSSQL
+    ProductImages[Blob Storage] --> CDN
+```
+
+**Implemented techniques:**  
+- Next.js `next/image` for automatic optimisation.  
+- **Incremental Static Regeneration (ISR)** for product catalogue (revalidate every 60s).  
+- API responses include `ETag` & `Cache-Control`.  
+- Database indexes on `Products.Name`, `CategoryId`, `Orders.UserId`.  
+- Lazy loading for reviews & related products.
+
+---
+
+## How to Use These Diagrams
+
+1. Copy any **Mermaid** code block (starting with ` ```mermaid `).  
+2. Paste it into:  
+   - **GitHub** Markdown (renders automatically)  
+   - **VS Code** with Mermaid Preview extension  
+   - [Mermaid Live Editor](https://mermaid.live/)  
+3. For **high‑resolution images**, export from Mermaid Live as PNG/SVG.
+
+---
+
+## Summary – Architecture Highlights
+
+| Layer               | Technology                            | Responsibility                              |
+|---------------------|---------------------------------------|---------------------------------------------|
+| **Frontend**        | Next.js + Bootstrap 5 + Firebase SDK  | UI, client auth, state, PWA                |
+| **Backend**         | ASP.NET Core Web API                  | Business logic, REST endpoints, validation |
+| **Database**        | MSSQL (Azure SQL / local)             | Persistent storage (ACID)                  |
+| **Auth**            | Firebase Auth + JWT                   | User identity + role management            |
+| **Payment**         | PayHere (webhooks)                    | Online payments, order status sync         |
+| **Caching**         | Redis (optional)                      | Session store, product catalogue cache     |
+| **File Storage**    | Azure Blob / S3 + CDN                 | Product images, invoice PDFs               |
+| **Background Jobs** | Hangfire / Azure Functions            | Email, stock updates, analytics            |
+| **Deployment**      | Vercel (FE) + Azure App Service (BE)  | CI/CD, scaling, monitoring                 |
+
+**Next steps for you:**  
+- Create a **draw.io** / **Lucidchart** version using these diagrams as blueprint.  
+- Add **detailed API specifications** (OpenAPI/Swagger) to the backend.  
+- Prepare a **deployment checklist** (environment variables, CORS, SSL).  
+
+This architecture supports all the requirements (multi‑vendor, AI recommendations, live chat) as future extensions without major rewrites.
