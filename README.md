@@ -608,9 +608,4 @@ graph LR
 | **Background Jobs** | Hangfire / Azure Functions            | Email, stock updates, analytics            |
 | **Deployment**      | Vercel (FE) + Azure App Service (BE)  | CI/CD, scaling, monitoring                 |
 
-**Next steps for you:**  
-- Create a **draw.io** / **Lucidchart** version using these diagrams as blueprint.  
-- Add **detailed API specifications** (OpenAPI/Swagger) to the backend.  
-- Prepare a **deployment checklist** (environment variables, CORS, SSL).  
 
-This architecture supports all the requirements (multi‑vendor, AI recommendations, live chat) as future extensions without major rewrites.
